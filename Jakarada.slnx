@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Jakarada.CLI/Jakarada.CLI.csproj" />
+    <Project Path="src/Jakarada.Core/Jakarada.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Jakarada.Tests/Jakarada.Tests.csproj" />
+  </Folder>
+</Solution>
