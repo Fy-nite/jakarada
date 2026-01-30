@@ -186,7 +186,7 @@ public class AssemblyParser
         if (token.Type == TokenType.HexNumber)
         {
             var hexValue = token.Value.StartsWith("0x") || token.Value.StartsWith("0X")
-                ? token.Value.Substring(2)
+                ? token.Value[2..]
                 : token.Value;
             
             var immOp = new ImmediateOperand
@@ -215,7 +215,7 @@ public class AssemblyParser
             return labelRef;
         }
         
-        throw new Exception($"Unexpected token {token.Type} at {token.Line}:{token.Column}");
+        throw new ParserException($"Unexpected token {token.Type}", token.Line, token.Column);
     }
 
     private MemoryOperand ParseMemoryOperand()
@@ -274,7 +274,7 @@ public class AssemblyParser
                 }
                 else
                 {
-                    throw new Exception($"Multiple index registers not supported at {Current().Line}:{Current().Column}");
+                    throw new ParserException("Multiple index registers not supported", Current().Line, Current().Column);
                 }
             }
             else if (Current().Type == TokenType.Number || Current().Type == TokenType.HexNumber)
@@ -286,7 +286,7 @@ public class AssemblyParser
         
         if (Current().Type != TokenType.RightBracket)
         {
-            throw new Exception($"Expected ']' at {Current().Line}:{Current().Column}");
+            throw new ParserException("Expected ']'", Current().Line, Current().Column);
         }
         
         Advance(); // ']'
@@ -307,13 +307,13 @@ public class AssemblyParser
         if (token.Type == TokenType.HexNumber)
         {
             var hexValue = token.Value.StartsWith("0x") || token.Value.StartsWith("0X")
-                ? token.Value.Substring(2)
+                ? token.Value[2..]
                 : token.Value;
             Advance();
             return Convert.ToInt64(hexValue, 16);
         }
         
-        throw new Exception($"Expected numeric value at {token.Line}:{token.Column}");
+        throw new ParserException("Expected numeric value", token.Line, token.Column);
     }
 
     private void SkipNewLines()

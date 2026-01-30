@@ -231,13 +231,16 @@ public class AssemblyLexer
             '+' => new Token(TokenType.Plus, "+", _line, startColumn),
             '-' => new Token(TokenType.Minus, "-", _line, startColumn),
             '*' => new Token(TokenType.Asterisk, "*", _line, startColumn),
-            _ => throw new Exception($"Unexpected character '{currentChar}' at {_line}:{startColumn}")
+            _ => throw new LexerException($"Unexpected character '{currentChar}'", _line, startColumn)
         };
     }
 
     private bool MatchNext(string text)
     {
         var savedPos = _position;
+        var savedLine = _line;
+        var savedColumn = _column;
+        
         SkipWhitespace();
         
         foreach (var ch in text)
@@ -245,12 +248,16 @@ public class AssemblyLexer
             if (IsAtEnd() || char.ToLower(Peek()) != char.ToLower(ch))
             {
                 _position = savedPos;
+                _line = savedLine;
+                _column = savedColumn;
                 return false;
             }
             Advance();
         }
         
         _position = savedPos;
+        _line = savedLine;
+        _column = savedColumn;
         return true;
     }
 
