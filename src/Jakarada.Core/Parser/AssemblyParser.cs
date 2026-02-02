@@ -10,11 +10,29 @@ public class AssemblyParser
 {
     private readonly List<Token> _tokens;
     private int _position;
+    private LabelNode? _pendingLabelNode;
 
     public AssemblyParser(List<Token> tokens)
     {
         _tokens = tokens;
         _position = 0;
+    }
+
+    private void FlushPendingLabel(ProgramNode program)
+    {
+        if (_pendingLabelNode != null)
+        {
+            var dummyInstr = new InstructionNode
+            {
+                Mnemonic = "DB",
+                Label = _pendingLabelNode.Name,
+                LineNumber = _pendingLabelNode.LineNumber,
+                ColumnNumber = _pendingLabelNode.ColumnNumber
+            };
+            dummyInstr.Comment = "Implicit label anchor";
+            program.Instructions.Add(dummyInstr);
+            _pendingLabelNode = null;
+        }
     }
 
     /// <summary>
@@ -34,21 +52,67 @@ public class AssemblyParser
             // Check for label (identifier followed by colon)
             if (Current().Type == TokenType.Identifier && Peek(1).Type == TokenType.Colon)
             {
+                FlushPendingLabel(program); // Flush any previous pending label
+
                 var label = ParseLabel();
                 program.Labels.Add(label);
                 
                 // Check if there's an instruction on the same line
                 if (!IsAtEnd() && Current().Type != TokenType.NewLine && Current().Type != TokenType.Comment)
                 {
-                    var instruction = ParseInstruction();
-                    instruction.Label = label.Name;
-                    program.Instructions.Add(instruction);
+                    var instr = ParseInstruction();
+                    instr.Label = label.Name;
+                    program.Instructions.Add(instr);
+                }
+                else
+                {
+                    _pendingLabelNode = label;
                 }
             }
             else if (Current().Type == TokenType.Identifier)
             {
-                var instruction = ParseInstruction();
-                program.Instructions.Add(instruction);
+                // Support label before directive without a colon (e.g., "msg db ..." or "len eqo ...").
+                // If the next token is an identifier and matches a known directive, treat the current
+                // identifier as a label attached to the following instruction.
+                if (Peek(1).Type == TokenType.Identifier)
+                {
+                    var next = Peek(1).Value.ToLower();
+                    if (next == "db" || next == "dw" || next == "dd" || next == "dq" || next == "eq" || next == "eqo" || next == "equ")
+                    {
+                        FlushPendingLabel(program);
+
+                        // Create label node
+                        var labelToken = Current();
+                        var label = new LabelNode
+                        {
+                            Name = labelToken.Value,
+                            LineNumber = labelToken.Line,
+                            ColumnNumber = labelToken.Column
+                        };
+                        program.Labels.Add(label);
+
+                        Advance(); // consume label identifier
+
+                        // Now parse the following instruction (directive)
+                        if (!IsAtEnd() && Current().Type == TokenType.Identifier)
+                        {
+                            var instrDir = ParseInstruction();
+                            instrDir.Label = label.Name;
+                            program.Instructions.Add(instrDir);
+                        }
+                        continue;
+                    }
+                }
+
+                var instrGeneric = ParseInstruction();
+                
+                if (_pendingLabelNode != null)
+                {
+                    instrGeneric.Label = _pendingLabelNode.Name;
+                    _pendingLabelNode = null;
+                }
+                
+                program.Instructions.Add(instrGeneric);
             }
             else if (Current().Type == TokenType.Comment)
             {
@@ -57,6 +121,8 @@ public class AssemblyParser
             
             SkipNewLines();
         }
+
+        FlushPendingLabel(program);
         
         return program;
     }
@@ -88,21 +154,32 @@ public class AssemblyParser
         };
         
         Advance(); // mnemonic
-        
-        // Parse operands
-        while (!IsAtEnd() && Current().Type != TokenType.NewLine && Current().Type != TokenType.Comment)
+
+        var mnemonicLower = instruction.Mnemonic.ToLower();
+
+        // Some directives (EQU/EQO) accept a raw expression -- capture it verbatim
+        if (mnemonicLower == "eqo" || mnemonicLower == "equ" || mnemonicLower == "eq")
         {
-            var operand = ParseOperand();
-            instruction.Operands.Add(operand);
-            
-            // Check for comma (more operands)
-            if (Current().Type == TokenType.Comma)
+            instruction.DirectiveExprAST = ParseExpression();
+            instruction.DirectiveExpression = "EXPR"; 
+        }
+        else
+        {
+            // Parse operands
+            while (!IsAtEnd() && Current().Type != TokenType.NewLine && Current().Type != TokenType.Comment)
             {
-                Advance();
-            }
-            else
-            {
-                break;
+                var operand = ParseOperand();
+                instruction.Operands.Add(operand);
+                
+                // Check for comma (more operands)
+                if (Current().Type == TokenType.Comma)
+                {
+                    Advance();
+                }
+                else
+                {
+                    break;
+                }
             }
         }
         
@@ -168,54 +245,47 @@ public class AssemblyParser
             return regOp;
         }
         
-        // Immediate value (number or hex)
-        if (token.Type == TokenType.Number)
+        // String literal (for directives like db)
+        if (token.Type == TokenType.String)
         {
-            var immOp = new ImmediateOperand
+            var strOp = new Jakarada.Core.AST.StringOperand
             {
-                Value = long.Parse(token.Value),
+                Value = token.Value,
+                LineNumber = token.Line,
+                ColumnNumber = token.Column,
+                Size = size
+            };
+            Advance();
+            return strOp;
+        }
+        
+        // Parse expression
+        var expr = ParseExpression();
+        
+        if (expr is LiteralExpression lit)
+        {
+            return new ImmediateOperand
+            {
+                Value = lit.Value,
                 IsHex = false,
-                LineNumber = token.Line,
-                ColumnNumber = token.Column,
+                LineNumber = lit.LineNumber,
+                ColumnNumber = lit.ColumnNumber,
                 Size = size
             };
-            Advance();
-            return immOp;
         }
         
-        if (token.Type == TokenType.HexNumber)
+        if (expr is SymbolExpression sym)
         {
-            var hexValue = token.Value.StartsWith("0x") || token.Value.StartsWith("0X")
-                ? token.Value[2..]
-                : token.Value;
-            
-            var immOp = new ImmediateOperand
+            return new LabelReferenceOperand
             {
-                Value = Convert.ToInt64(hexValue, 16),
-                IsHex = true,
-                LineNumber = token.Line,
-                ColumnNumber = token.Column,
+                LabelName = sym.Name,
+                LineNumber = sym.LineNumber,
+                ColumnNumber = sym.ColumnNumber,
                 Size = size
             };
-            Advance();
-            return immOp;
         }
         
-        // Label reference (for jumps, calls, etc.)
-        if (token.Type == TokenType.Identifier)
-        {
-            var labelRef = new LabelReferenceOperand
-            {
-                LabelName = token.Value,
-                LineNumber = token.Line,
-                ColumnNumber = token.Column,
-                Size = size
-            };
-            Advance();
-            return labelRef;
-        }
-        
-        throw new ParserException($"Unexpected token {token.Type}", token.Line, token.Column);
+        return new ExpressionOperand(expr) { Size = size };
     }
 
     private MemoryOperand ParseMemoryOperand()
@@ -344,5 +414,109 @@ public class AssemblyParser
     private bool IsAtEnd()
     {
         return _position >= _tokens.Count || Current().Type == TokenType.EndOfFile;
+    }
+
+    private ExpressionNode ParseExpression()
+    {
+        return ParseBinary(0);
+    }
+
+    private ExpressionNode ParseBinary(int precedence)
+    {
+        var left = ParseUnary();
+
+        while (true)
+        {
+            var opToken = Current();
+            int newPrecedence = GetPrecedence(opToken.Type);
+           
+            if (newPrecedence <= precedence)
+                break;
+            
+            Advance(); // consume operator
+            var right = ParseBinary(newPrecedence);
+            left = new BinaryExpression(left, opToken.Type, right)
+            {
+                LineNumber = opToken.Line,
+                ColumnNumber = opToken.Column
+            };
+        }
+        return left;
+    }
+    
+    private ExpressionNode ParseUnary()
+    {
+        var token = Current();
+        if (token.Type == TokenType.Plus || token.Type == TokenType.Minus)
+        {
+            Advance();
+            var operand = ParseUnary();
+            return new UnaryExpression(token.Type, operand)
+            {
+                LineNumber = token.Line,
+                ColumnNumber = token.Column
+            };
+        }
+        return ParsePrimary();
+    }
+    
+    private ExpressionNode ParsePrimary()
+    {
+        var token = Current();
+        
+        if (token.Type == TokenType.Number)
+        {
+            Advance();
+            return new LiteralExpression(long.Parse(token.Value))
+            {
+                LineNumber = token.Line,
+                ColumnNumber = token.Column
+            };
+        }
+        if (token.Type == TokenType.HexNumber)
+        {
+            Advance();
+            var hexValue = token.Value.StartsWith("0x") || token.Value.StartsWith("0X") ? token.Value[2..] : token.Value;
+            return new LiteralExpression(Convert.ToInt64(hexValue, 16))
+            {
+                LineNumber = token.Line,
+                ColumnNumber = token.Column
+            };
+        }
+        if (token.Type == TokenType.Dollar)
+        {
+            Advance();
+            return new DollarExpression()
+            {
+                LineNumber = token.Line,
+                ColumnNumber = token.Column
+            };
+        }
+        if (token.Type == TokenType.Identifier)
+        {
+            Advance();
+            return new SymbolExpression(token.Value)
+            {
+                LineNumber = token.Line,
+                ColumnNumber = token.Column
+            };
+        }
+        if (token.Type == TokenType.LeftParen)
+        {
+            Advance();
+            var expr = ParseExpression();
+            if (Current().Type != TokenType.RightParen)
+                 throw new ParserException("Expected )", Current().Line, Current().Column);
+            Advance();
+            return expr;
+        }
+        throw new ParserException($"Unexpected token in expression: {token.Type}", token.Line, token.Column);
+    }
+    
+    private int GetPrecedence(TokenType type)
+    {
+        if (type == TokenType.Asterisk || type == TokenType.Slash || type == TokenType.Percent) return 2;
+        if (type == TokenType.Plus || type == TokenType.Minus) return 1;
+        return 0;
     }
 }

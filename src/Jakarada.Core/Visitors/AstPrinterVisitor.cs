@@ -139,6 +139,23 @@ public class AstPrinterVisitor : IAstVisitor<string>
         return node.LabelName;
     }
 
+    public string Visit(StringOperand node)
+    {
+        // Print with quotes and escaped characters
+        var escaped = node.Value
+            .Replace("\\", "\\\\")
+            .Replace("\"", "\\\"")
+            .Replace("\n", "\\n")
+            .Replace("\r", "\\r")
+            .Replace("\t", "\\t");
+        return "\"" + escaped + "\"";
+    }
+
+    public string Visit(ExpressionOperand node)
+    {
+        return node.Expression.ToString();
+    }
+
     private string Indent()
     {
         return new string(' ', _indentLevel * IndentSize);

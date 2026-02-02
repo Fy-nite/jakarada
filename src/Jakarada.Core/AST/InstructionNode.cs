@@ -25,6 +25,16 @@ public class InstructionNode : AstNode
     /// </summary>
     public string? Comment { get; set; }
 
+    /// <summary>
+    /// Gets or sets an optional directive expression (e.g., for EQU/EQO)
+    /// </summary>
+    public string? DirectiveExpression { get; set; }
+
+    /// <summary>
+    /// Gets or sets the parsed AST for the directive expression
+    /// </summary>
+    public ExpressionNode? DirectiveExprAST { get; set; }
+
     public override T Accept<T>(IAstVisitor<T> visitor)
     {
         return visitor.Visit(this);

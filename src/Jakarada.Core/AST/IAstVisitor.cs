@@ -9,7 +9,9 @@ public interface IAstVisitor<T>
     T Visit(InstructionNode node);
     T Visit(RegisterOperand node);
     T Visit(ImmediateOperand node);
+    T Visit(StringOperand node);
     T Visit(MemoryOperand node);
+    T Visit(ExpressionOperand node);
     T Visit(LabelNode node);
     T Visit(LabelReferenceOperand node);
 }

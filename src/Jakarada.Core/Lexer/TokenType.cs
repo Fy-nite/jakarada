@@ -10,15 +10,21 @@ public enum TokenType
     Register,
     Number,
     HexNumber,
+    String,
+    Dollar,
     
     // Operators and delimiters
     Comma,
     Colon,
     LeftBracket,
     RightBracket,
+    LeftParen,
+    RightParen,
     Plus,
     Minus,
     Asterisk,
+    Slash,
+    Percent,
     
     // Special
     Comment,

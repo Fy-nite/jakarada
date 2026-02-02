@@ -101,6 +101,13 @@ public class AssemblyLexer
         }
 
         // Identifiers and keywords
+        // String literals
+        if (currentChar == '"' || currentChar == '\'')
+        {
+            return ReadString();
+        }
+
+        // Identifiers and keywords
         if (char.IsLetter(currentChar) || currentChar == '_')
         {
             return ReadIdentifier();
@@ -108,6 +115,52 @@ public class AssemblyLexer
 
         // Operators and delimiters
         return ReadOperator();
+    }
+
+    private Token ReadString()
+    {
+        var startColumn = _column;
+        var quote = Advance(); // consume opening quote
+        var sb = new StringBuilder();
+
+        while (!IsAtEnd())
+        {
+            var ch = Advance();
+
+            if (ch == '\n' || ch == '\r')
+            {
+                throw new LexerException("Unterminated string literal", _line, _column);
+            }
+
+            if (ch == '\\')
+            {
+                if (IsAtEnd())
+                    throw new LexerException("Unterminated string escape", _line, _column);
+
+                var esc = Advance();
+                switch (esc)
+                {
+                    case 'n': sb.Append('\n'); break;
+                    case 'r': sb.Append('\r'); break;
+                    case 't': sb.Append('\t'); break;
+                    case '\\': sb.Append('\\'); break;
+                    case '\'': sb.Append('\''); break;
+                    case '"': sb.Append('"'); break;
+                    default: sb.Append(esc); break;
+                }
+                continue;
+            }
+
+            if (ch == quote)
+            {
+                // End of string
+                return new Token(TokenType.String, sb.ToString(), _line, startColumn);
+            }
+
+            sb.Append(ch);
+        }
+
+        throw new LexerException("Unterminated string literal", _line, _column);
     }
 
     private Token ReadComment()
@@ -228,9 +281,14 @@ public class AssemblyLexer
             ':' => new Token(TokenType.Colon, ":", _line, startColumn),
             '[' => new Token(TokenType.LeftBracket, "[", _line, startColumn),
             ']' => new Token(TokenType.RightBracket, "]", _line, startColumn),
+            '(' => new Token(TokenType.LeftParen, "(", _line, startColumn),
+            ')' => new Token(TokenType.RightParen, ")", _line, startColumn),
             '+' => new Token(TokenType.Plus, "+", _line, startColumn),
             '-' => new Token(TokenType.Minus, "-", _line, startColumn),
             '*' => new Token(TokenType.Asterisk, "*", _line, startColumn),
+            '/' => new Token(TokenType.Slash, "/", _line, startColumn),
+            '%' => new Token(TokenType.Percent, "%", _line, startColumn),
+            '$' => new Token(TokenType.Dollar, "$", _line, startColumn),
             _ => throw new LexerException($"Unexpected character '{currentChar}'", _line, startColumn)
         };
     }
